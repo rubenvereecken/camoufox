@@ -64,10 +64,11 @@ class Patcher:
             if not options.mozconfig_only:
                 # Apply patches with roverfox patches at the very end
                 all_patches = list_patches()
+                ordered_patches = self._order_patches_by_dependencies(all_patches)
                 # Normalize paths and partition into non-roverfox and roverfox
                 non_roverfox = []
                 roverfox = []
-                for p in all_patches:
+                for p in ordered_patches:
                     norm = os.path.normpath(p)
                     parts = norm.split(os.sep)
                     if 'roverfox' in parts:
@@ -109,19 +110,16 @@ class Patcher:
         Apply a patch and check for reject files.
         Returns list of reject files if any, empty list otherwise.
         """
-        import time
+        import subprocess
 
         print(f"\n*** -> patch -p1 -i {patch_file}")
         sys.stdout.flush()
 
-        # Record time before applying so we only detect .rej files from this patch
-        start_time = time.time()
-
+        # Capture existing reject files before/after so one failed patch doesn't
+        # poison every subsequent patch with the same stale *.rej paths.
+        rejects_before = self._find_reject_files()
         # Apply patch interactively - don't capture stdout/stderr at all
-        # This allows prompts to show immediately and user can respond
-        # --forward flag: skip patches that appear to be already applied
-        # --binary flag: preserve line endings (helps with CRLF vs LF differences)
-        # -l flag: ignore whitespace differences
+        # This allows prompts to show immediately and user can respond.
         result = subprocess.run(
             ['patch', '-p1', '--forward', '-l', '--binary', '-i', patch_file],
             stdin=sys.stdin,
@@ -129,23 +127,68 @@ class Patcher:
             stderr=sys.stderr,
             text=True
         )
+        _ = result  # keep explicit for readability; result code handled via .rej detection
+        rejects_after = self._find_reject_files()
+        rejects = sorted(rejects_after - rejects_before)
 
-        # After patch completes, search for any .rej files created during this patch
-        rejects = []
+        return rejects
+
+    def _find_reject_files(self):
+        reject_paths = set()
         for root, dirs, files in os.walk('.'):
             for file in files:
                 if file.endswith('.rej'):
-                    reject_path = os.path.join(root, file)
-                    if os.path.exists(reject_path):
-                        # Only include if created after this patch started
-                        if os.path.getmtime(reject_path) >= start_time:
-                            rejects.append(reject_path)
+                    reject_paths.add(os.path.join(root, file))
+        return reject_paths
 
-        # Clean up .rej files so they don't interfere with subsequent patches
-        for rej in rejects:
-            os.remove(rej)
+    def _order_patches_by_dependencies(self, patch_files):
+        """
+        Topologically order patches using known inter-patch dependencies.
+        Unknown patches keep their relative order and are applied as-is.
+        """
+        dependency_map = {
+            'playwright/1-leak-fixes.patch': ['playwright/0-playwright.patch'],
+            'fingerprint-injection.patch': ['browser-init.patch', 'chromeutil.patch'],
+            'navigator-spoofing.patch': ['fingerprint-injection.patch'],
+            'anti-font-fingerprinting.patch': ['fingerprint-injection.patch'],
+            'audio-fingerprint-manager.patch': ['fingerprint-injection.patch'],
+            'canvas-spoofing.patch': ['fingerprint-injection.patch'],
+            'font-list-spoofing.patch': ['fingerprint-injection.patch', 'font-hijacker.patch'],
+            'locale-spoofing.patch': ['browser-init.patch'],
+            'screen-spoofing.patch': ['fingerprint-injection.patch'],
+            'speech-voices-spoofing.patch': ['fingerprint-injection.patch'],
+            'timezone-spoofing.patch': ['fingerprint-injection.patch'],
+            'voice-spoofing.patch': ['speech-voices-spoofing.patch'],
+            'webgl-spoofing.patch': ['fingerprint-injection.patch'],
+            'webrtc-ip-spoofing.patch': ['fingerprint-injection.patch'],
+        }
 
-        return rejects
+        by_key = {}
+        for patch_path in patch_files:
+            key = patch_path.replace('../patches/', '')
+            by_key[key] = patch_path
+
+        ordered_keys = []
+        visiting = set()
+        visited = set()
+
+        def visit(key):
+            if key in visited:
+                return
+            if key in visiting:
+                return
+            visiting.add(key)
+            for dep in dependency_map.get(key, []):
+                if dep in by_key:
+                    visit(dep)
+            visiting.remove(key)
+            visited.add(key)
+            ordered_keys.append(key)
+
+        for patch_path in patch_files:
+            visit(patch_path.replace('../patches/', ''))
+
+        return [by_key[key] for key in ordered_keys]
 
     def _update_mozconfig(self):
         """

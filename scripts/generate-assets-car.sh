@@ -29,13 +29,24 @@ if [[ "$(uname)" != "Darwin" ]]; then
     exit 0
 fi
 
-# Check for actool
-if ! command -v actool &>/dev/null && ! xcrun --find actool &>/dev/null; then
-    echo "Error: actool not found. Please install Xcode Command Line Tools."
-    exit 1
+# Resolve a usable actool binary. On some macOS setups xcrun can locate actool
+# but executing it still fails unless full Xcode is installed.
+ACTOOL=""
+if command -v actool &>/dev/null; then
+    ACTOOL="actool"
+elif xcrun --find actool &>/dev/null; then
+    ACTOOL="$(xcrun --find actool 2>/dev/null || true)"
 fi
 
-ACTOOL=$(xcrun --find actool 2>/dev/null || echo "actool")
+if [[ -z "$ACTOOL" ]] || ! "$ACTOOL" --version &>/dev/null; then
+    if [[ -f "$OUTPUT_FILE" ]]; then
+        echo "Warning: usable actool not available. Reusing existing Assets.car."
+        exit 0
+    fi
+    echo "Error: usable actool not available and no existing Assets.car is present."
+    echo "Install full Xcode or provide an Assets.car file."
+    exit 1
+fi
 
 echo "Generating Assets.car from camoufox branding icons..."
 

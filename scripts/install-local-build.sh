@@ -28,9 +28,18 @@ CONFIG_FILE="${CACHE_DIR}/config.json"
 
 ARTIFACT="${1:-}"
 if [[ -z "$ARTIFACT" ]]; then
-    ARTIFACT="$(ls -t "$REPO_ROOT"/dist/camoufox-*-mac.arm64.zip 2>/dev/null | head -1)"
+    # Auto-detect platform
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64)  PLAT="mac.arm64" ;;
+        Darwin-x86_64) PLAT="mac.x86_64" ;;
+        Linux-x86_64)  PLAT="lin.x86_64" ;;
+        Linux-aarch64) PLAT="lin.aarch64" ;;
+        MINGW*|MSYS*|CYGWIN*)  PLAT="win.x86_64" ;;
+        *)             echo "Unknown platform: $(uname -s)-$(uname -m)"; exit 1 ;;
+    esac
+    ARTIFACT="$(ls -t "$REPO_ROOT"/dist/camoufox-*-"${PLAT}".zip 2>/dev/null | head -1)"
     if [[ -z "$ARTIFACT" ]]; then
-        echo "No artifact found in dist/. Pass the zip path as an argument."
+        echo "No artifact found in dist/ for ${PLAT}. Pass the zip path as an argument."
         exit 1
     fi
     echo "Using latest artifact: $ARTIFACT"
@@ -50,7 +59,7 @@ if [[ -z "$VERSION_BUILD" ]]; then
     # Strip prefix "camoufox-" and suffix "-mac.arm64.zip" (or similar)
     VERSION_BUILD="${BASENAME#camoufox-}"
     VERSION_BUILD="${VERSION_BUILD%-mac.*}"
-    VERSION_BUILD="${VERSION_BUILD%-linux.*}"
+    VERSION_BUILD="${VERSION_BUILD%-lin.*}"
     VERSION_BUILD="${VERSION_BUILD%-win.*}"
 fi
 
@@ -67,6 +76,10 @@ BUILD="${VERSION_BUILD#${VERSION}-}"
 INSTALL_DIR="${BROWSERS_DIR}/local/${VERSION_BUILD}"
 
 echo "Installing to: $INSTALL_DIR"
+
+# --- Ensure compat flag exists (prevents pip camoufox from wiping the cache) ---
+
+touch "${CACHE_DIR}/.0.5_FLAG"
 
 # --- Install ---
 
@@ -123,7 +136,7 @@ with open('$CONFIG_FILE', 'w') as f:
 "
 else
     mkdir -p "$(dirname "$CONFIG_FILE")"
-    echo "{\"active_version\": \"$RELATIVE_PATH\"}" > "$CONFIG_FILE"
+    echo "{\"channel\": \"official/stable\", \"active_version\": \"$RELATIVE_PATH\"}" > "$CONFIG_FILE"
 fi
 
 echo ""

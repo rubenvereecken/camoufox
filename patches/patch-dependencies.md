@@ -1,5 +1,6 @@
 # Patch Dependencies
 
+<<<<<<< HEAD
 Every patch and its dependencies. A patch must be applied **after** its dependencies.
 
 ## Foundation (no dependencies)

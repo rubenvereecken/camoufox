@@ -24,9 +24,20 @@ fi
 BROWSERS_DIR="${CACHE_DIR}/browsers"
 CONFIG_FILE="${CACHE_DIR}/config.json"
 
+# --- Parse flags ---
+
+PRE_WARM=false
+POSITIONAL_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --pre-warm) PRE_WARM=true ;;
+        *)          POSITIONAL_ARGS+=("$arg") ;;
+    esac
+done
+
 # --- Resolve artifact zip ---
 
-ARTIFACT="${1:-}"
+ARTIFACT="${POSITIONAL_ARGS[0]:-}"
 if [[ -z "$ARTIFACT" ]]; then
     # Auto-detect platform
     case "$(uname -s)-$(uname -m)" in
@@ -52,7 +63,7 @@ fi
 
 # --- Resolve version-build string ---
 
-VERSION_BUILD="${2:-}"
+VERSION_BUILD="${POSITIONAL_ARGS[1]:-}"
 if [[ -z "$VERSION_BUILD" ]]; then
     # Extract from filename: camoufox-<version>-<build>-mac.arm64.zip
     BASENAME="$(basename "$ARTIFACT")"
@@ -79,6 +90,7 @@ echo "Installing to: $INSTALL_DIR"
 
 # --- Ensure compat flag exists (prevents pip camoufox from wiping the cache) ---
 
+mkdir -p "${CACHE_DIR}"
 touch "${CACHE_DIR}/.0.5_FLAG"
 
 # --- Install ---
@@ -97,13 +109,14 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 unzip -q "$ARTIFACT" -d "$TMP_DIR"
 
 # Handle macOS structure: the zip may contain Camoufox.app directly or nested
+# Use cp -a instead of mv — mv fails with "Directory not empty" on partial reinstalls
 if [[ -d "$TMP_DIR/Camoufox.app" ]]; then
-    mv "$TMP_DIR/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+    cp -a "$TMP_DIR/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
 elif [[ -d "$TMP_DIR/Camoufox/Camoufox.app" ]]; then
-    mv "$TMP_DIR/Camoufox/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+    cp -a "$TMP_DIR/Camoufox/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
 else
-    # Linux/Windows: move everything
-    mv "$TMP_DIR"/* "$INSTALL_DIR/"
+    # Linux/Windows: copy everything
+    cp -a "$TMP_DIR"/. "$INSTALL_DIR/"
 fi
 
 # Fix permissions (cp/unzip can strip executable bits)
@@ -148,6 +161,32 @@ PLIST="$INSTALL_DIR/Camoufox.app/Contents/Info.plist"
 if [[ -f "$PLIST" ]]; then
     BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "unknown")"
     echo "Bundle:    $BUNDLE_VERSION"
+fi
+
+# --- Remove official build (prevents fallback overwrite of config.json) ---
+
+if [[ -d "${BROWSERS_DIR}/official" ]]; then
+    rm -rf "${BROWSERS_DIR}/official"
+    echo "Removed official build (prevents fallback overwrite)"
+fi
+
+# --- Pre-warm: download addons and GeoIP databases ---
+
+if [[ "$PRE_WARM" == true ]]; then
+    echo ""
+    echo "Pre-warming caches..."
+    python3 -c "
+from camoufox.addons import maybe_download_addons, DefaultAddons
+maybe_download_addons([DefaultAddons.UBO])
+print('UBO addon cached')
+
+try:
+    from camoufox.geolocation import download_mmdb
+    download_mmdb()
+    print('GeoIP databases cached')
+except Exception as e:
+    print(f'GeoIP download skipped: {e}')
+"
 fi
 
 echo ""

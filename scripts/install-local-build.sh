@@ -175,11 +175,17 @@ fi
 if [[ "$PRE_WARM" == true ]]; then
     echo ""
     echo "Pre-warming caches..."
-    # Find a Python that has camoufox installed (venv, uv, or system)
+    # Find a Python that has camoufox installed
     PYTHON="python3"
-    if [[ -f "$REPO_ROOT/../drivingtest/dvsa-scraper/.venv/bin/python" ]]; then
-        PYTHON="$REPO_ROOT/../drivingtest/dvsa-scraper/.venv/bin/python"
-    fi
+    for candidate in \
+        "$REPO_ROOT/pythonlib/../.venv/bin/python" \
+        "$HOME/20tech/drivingtest/dvsa-scraper/.venv/bin/python" \
+        "$(command -v python3 2>/dev/null)"; do
+        if [[ -x "$candidate" ]] && "$candidate" -c "import camoufox" 2>/dev/null; then
+            PYTHON="$candidate"
+            break
+        fi
+    done
     "$PYTHON" -c "
 from camoufox.addons import maybe_download_addons, DefaultAddons
 maybe_download_addons([DefaultAddons.UBO])

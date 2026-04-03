@@ -175,7 +175,12 @@ fi
 if [[ "$PRE_WARM" == true ]]; then
     echo ""
     echo "Pre-warming caches..."
-    python3 -c "
+    # Find a Python that has camoufox installed (venv, uv, or system)
+    PYTHON="python3"
+    if [[ -f "$REPO_ROOT/../drivingtest/dvsa-scraper/.venv/bin/python" ]]; then
+        PYTHON="$REPO_ROOT/../drivingtest/dvsa-scraper/.venv/bin/python"
+    fi
+    "$PYTHON" -c "
 from camoufox.addons import maybe_download_addons, DefaultAddons
 maybe_download_addons([DefaultAddons.UBO])
 print('UBO addon cached')
@@ -186,7 +191,7 @@ try:
     print('GeoIP databases cached')
 except Exception as e:
     print(f'GeoIP download skipped: {e}')
-"
+" || echo "Pre-warm failed (camoufox not importable). Run manually after uv sync."
 fi
 
 echo ""

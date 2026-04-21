@@ -7,6 +7,9 @@ const {Preferences} = ChromeUtils.importESModule("resource://gre/modules/Prefere
 const {ContextualIdentityService} = ChromeUtils.importESModule("resource://gre/modules/ContextualIdentityService.sys.mjs");
 const {NetUtil} = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const {AppConstants} = ChromeUtils.importESModule("resource://gre/modules/AppConstants.sys.mjs");
+// Camoufox (Ruben): chrome-privileged contexts don't have setTimeout/clearTimeout
+// in the global scope like DOM windows do. Import from Firefox's timer module.
+const {setTimeout, clearTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
 
 const Cr = Components.results;
 
@@ -24,6 +27,18 @@ let globalTabAndWindowActivationChain = Promise.resolve();
 // This is a workaround for https://github.com/microsoft/playwright/issues/34586
 let didCreateFirstPage = false;
 let globalNewPageChain = Promise.resolve();
+
+// Camoufox (Ruben): bound activateAndRun so a single wedged mouse-event ack
+// can't freeze every subsequent mouse dispatch via the module-global chain.
+// Root cause reference: observed mouse.move pipeline deadlock after ~80
+// trajectories on example.com — wedge was process-wide (fresh context +
+// fresh page also hung), keyboard worked fine (doesn't use activateAndRun),
+// consistent with `await Promise.all([watcher.ensureEvent(...)])` in
+// Page.dispatchMouseEvent (PageHandler.js) never resolving because the
+// juggler-mouse-event-hit-renderer observer notification for one specific
+// event didn't arrive. Timeout + chain reset contains the blast radius
+// from "permanent browser-wide mouse death" to "one raise-and-retry".
+const ACTIVATE_AND_RUN_TIMEOUT_MS = 3000;
 
 class DownloadInterceptor {
   constructor(registry) {
@@ -441,21 +456,51 @@ export class PageTarget {
     // Serialize all tab-switching commands per tabbed browser
     // to disallow concurrent tab switching.
     const result = globalTabAndWindowActivationChain.then(async () => {
-      this._window.focus();
-      if (tabBrowser.selectedTab !== this._tab) {
-        const promise = helper.awaitEvent(ownerWindow, 'TabSwitchDone');
-        tabBrowser.selectedTab = this._tab;
-        await promise;
-      }
-      const notificationsPopup = muteNotificationsPopup ? this._linkedBrowser?.ownerDocument.getElementById('notification-popup') : null;
-      notificationsPopup?.style.setProperty('pointer-events', 'none');
+      // Camoufox (Ruben): race the inner block against a timeout. Without
+      // this, if any await below hangs (most likely `await callback()`
+      // waiting on a mouse-event-hit-renderer ack that never arrives), the
+      // module-global chain above holds every subsequent mouse dispatch
+      // forever — across all contexts and pages. The timeout converts that
+      // permanent browser-wide deadlock into a single rejected dispatch
+      // that the Python caller can retry.
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(
+            `juggler activateAndRun exceeded ${ACTIVATE_AND_RUN_TIMEOUT_MS}ms ` +
+            `— likely lost mouse-event-hit-renderer ack; chain reset`
+          )),
+          ACTIVATE_AND_RUN_TIMEOUT_MS,
+        );
+      });
+      const work = (async () => {
+        this._window.focus();
+        if (tabBrowser.selectedTab !== this._tab) {
+          const promise = helper.awaitEvent(ownerWindow, 'TabSwitchDone');
+          tabBrowser.selectedTab = this._tab;
+          await promise;
+        }
+        const notificationsPopup = muteNotificationsPopup ? this._linkedBrowser?.ownerDocument.getElementById('notification-popup') : null;
+        notificationsPopup?.style.setProperty('pointer-events', 'none');
+        try {
+          await callback();
+        } finally {
+          notificationsPopup?.style.removeProperty('pointer-events');
+        }
+      })();
       try {
-        await callback();
+        await Promise.race([work, timeoutPromise]);
       } finally {
-        notificationsPopup?.style.removeProperty('pointer-events');
+        clearTimeout(timeoutId);
       }
     });
-    globalTabAndWindowActivationChain = result.catch(error => { /* swallow errors to keep chain running */ });
+    globalTabAndWindowActivationChain = result.catch(error => {
+      // Camoufox (Ruben): on our timeout we need the NEXT activateAndRun to
+      // start on a fresh chain, not queue behind a still-pending `work`
+      // promise. `.catch` returning a resolved Promise<undefined> is what
+      // unblocks the next `.then(...)` in the chain.
+      /* swallow errors to keep chain running */
+    });
     return result;
   }
 

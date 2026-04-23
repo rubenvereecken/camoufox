@@ -18,7 +18,8 @@ from camoufox.webgl import sample_webgl
 # Load the browserforge.yaml file
 BROWSERFORGE_DATA = load_yaml('browserforge.yml')
 
-FP_GENERATOR = FingerprintGenerator(browser='firefox', os=('linux', 'macos', 'windows'))
+def _new_fp_generator() -> FingerprintGenerator:
+    return FingerprintGenerator(browser='firefox', os=('linux', 'macos', 'windows'))
 
 # Bundled real fingerprint presets
 PRESETS_FILE = Path(__file__).parent / 'fingerprint-presets.json'
@@ -701,10 +702,10 @@ def generate_fingerprint(window: Optional[Tuple[int, int]] = None, **config) -> 
     Generates a Firefox fingerprint with Browserforge.
     """
     if window:  # User-specified outer window size
-        fingerprint = FP_GENERATOR.generate(**config)
+        fingerprint = _new_fp_generator().generate(**config)
         handle_window_size(fingerprint, *window)
         return fingerprint
-    return FP_GENERATOR.generate(**config)
+    return _new_fp_generator().generate(**config)
 
 
 if __name__ == "__main__":

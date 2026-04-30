@@ -292,10 +292,11 @@ def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any
     if webgl.get('unmaskedRenderer'):
         config['webGl:renderer'] = webgl['unmaskedRenderer']
 
-    # Generate unique random seeds per launch (1 to 2^32-1, excluding 0 which is a no-op in C++)
-    config['fonts:spacing_seed'] = randint(1, 4_294_967_295)  # nosec
-    config['audio:seed'] = randint(1, 4_294_967_295)  # nosec
-    config['canvas:seed'] = randint(1, 4_294_967_295)  # nosec
+    # Generate unique random seeds per launch (1 to 2^32-1, excluding 0 which is a no-op in C++).
+    # Honour preset overrides so callers can pass 0 to disable perturbation.
+    config['fonts:spacing_seed'] = preset.get('fonts:spacing_seed', randint(1, 4_294_967_295))  # nosec
+    config['audio:seed'] = preset.get('audio:seed', randint(1, 4_294_967_295))  # nosec
+    config['canvas:seed'] = preset.get('canvas:seed', randint(1, 4_294_967_295))  # nosec
 
     if preset.get('timezone'):
         config['timezone'] = preset['timezone']

@@ -154,6 +154,7 @@ class Patcher:
             'audio-fingerprint-manager.patch': ['fingerprint-injection.patch'],
             'canvas-spoofing.patch': ['fingerprint-injection.patch'],
             'font-list-spoofing.patch': ['fingerprint-injection.patch', 'font-hijacker.patch'],
+            'system-ui-font-spoofing.patch': ['font-hijacker.patch'],
             'locale-spoofing.patch': ['browser-init.patch'],
             'screen-spoofing.patch': ['fingerprint-injection.patch'],
             'speech-voices-spoofing.patch': ['fingerprint-injection.patch'],

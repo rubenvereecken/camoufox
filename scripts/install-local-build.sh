@@ -3,9 +3,11 @@
 #
 # Usage:
 #   ./install-local-build.sh [artifact.zip] [version-build]
+#   ./install-local-build.sh --from-build    # install from build tree (default when no zip and build exists)
 #
-# If no artifact is given, uses the latest zip in dist/.
-# If no version-build is given, extracts it from the zip filename.
+# If no artifact is given, prefers the live build tree (obj-*/dist/) over dist/*.zip.
+# This avoids the stale-zip trap where `make build` compiles fresh code but the
+# dist/ zip is from a previous `multibuild.py` run.
 #
 # Installs to ~/.cache/camoufox/browsers/local/<version-build>/
 # and sets active_version in config.json.
@@ -24,69 +26,103 @@ fi
 BROWSERS_DIR="${CACHE_DIR}/browsers"
 CONFIG_FILE="${CACHE_DIR}/config.json"
 
+# --- Read version/release from upstream.sh ---
+
+source "$REPO_ROOT/upstream.sh"
+VERSION_BUILD="${version}-${release}"
+VERSION="$version"
+BUILD="$release"
+
 # --- Parse flags ---
 
 PRE_WARM=false
+FROM_BUILD=false
 POSITIONAL_ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --pre-warm) PRE_WARM=true ;;
-        *)          POSITIONAL_ARGS+=("$arg") ;;
+        --pre-warm)   PRE_WARM=true ;;
+        --from-build) FROM_BUILD=true ;;
+        *)            POSITIONAL_ARGS+=("$arg") ;;
     esac
 done
 
-# --- Resolve artifact zip ---
+# --- Detect platform ---
+
+case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64)  PLAT="mac.arm64";  OBJ_ARCH="aarch64-apple-darwin" ;;
+    Darwin-x86_64) PLAT="mac.x86_64"; OBJ_ARCH="x86_64-apple-darwin" ;;
+    Linux-x86_64)  PLAT="lin.x86_64"; OBJ_ARCH="x86_64-pc-linux-gnu" ;;
+    Linux-aarch64) PLAT="lin.aarch64"; OBJ_ARCH="aarch64-unknown-linux-gnu" ;;
+    MINGW*|MSYS*|CYGWIN*)  PLAT="win.x86_64"; OBJ_ARCH="x86_64-pc-windows-msvc" ;;
+    *)             echo "Unknown platform: $(uname -s)-$(uname -m)"; exit 1 ;;
+esac
+
+# --- Resolve source: build tree or artifact zip ---
+
+CF_SOURCE_DIR="${REPO_ROOT}/camoufox-${VERSION_BUILD}"
+BUILD_DIST="${CF_SOURCE_DIR}/obj-${OBJ_ARCH}/dist"
+INSTALL_FROM_BUILD=false
 
 ARTIFACT="${POSITIONAL_ARGS[0]:-}"
-if [[ -z "$ARTIFACT" ]]; then
-    # Auto-detect platform
-    case "$(uname -s)-$(uname -m)" in
-        Darwin-arm64)  PLAT="mac.arm64" ;;
-        Darwin-x86_64) PLAT="mac.x86_64" ;;
-        Linux-x86_64)  PLAT="lin.x86_64" ;;
-        Linux-aarch64) PLAT="lin.aarch64" ;;
-        MINGW*|MSYS*|CYGWIN*)  PLAT="win.x86_64" ;;
-        *)             echo "Unknown platform: $(uname -s)-$(uname -m)"; exit 1 ;;
-    esac
-    ARTIFACT="$(ls -t "$REPO_ROOT"/dist/camoufox-*-"${PLAT}".zip 2>/dev/null | head -1)"
-    if [[ -z "$ARTIFACT" ]]; then
-        echo "No artifact found in dist/ for ${PLAT}. Pass the zip path as an argument."
+
+if [[ -n "$ARTIFACT" ]]; then
+    # Explicit artifact — use it
+    if [[ ! -f "$ARTIFACT" ]]; then
+        echo "Artifact not found: $ARTIFACT"
         exit 1
     fi
-    echo "Using latest artifact: $ARTIFACT"
-fi
+    echo "Using artifact: $ARTIFACT"
+elif [[ "$FROM_BUILD" == true ]]; then
+    # Explicit --from-build
+    if [[ ! -d "$BUILD_DIST" ]]; then
+        echo "Build tree not found: $BUILD_DIST"
+        echo "Run 'make build' first."
+        exit 1
+    fi
+    INSTALL_FROM_BUILD=true
+elif [[ -d "$BUILD_DIST/Camoufox.app" ]] || [[ -d "$BUILD_DIST/bin" ]]; then
+    # Build tree exists — prefer it over dist/ zip (avoids stale-zip trap)
+    INSTALL_FROM_BUILD=true
+    echo "Using build tree: $BUILD_DIST"
 
-if [[ ! -f "$ARTIFACT" ]]; then
-    echo "Artifact not found: $ARTIFACT"
-    exit 1
-fi
-
-# --- Resolve version-build string ---
-
-VERSION_BUILD="${POSITIONAL_ARGS[1]:-}"
-if [[ -z "$VERSION_BUILD" ]]; then
-    # Extract from filename: camoufox-<version>-<build>-mac.arm64.zip
-    BASENAME="$(basename "$ARTIFACT")"
-    # Strip prefix "camoufox-" and suffix "-mac.arm64.zip" (or similar)
-    VERSION_BUILD="${BASENAME#camoufox-}"
-    VERSION_BUILD="${VERSION_BUILD%-mac.*}"
-    VERSION_BUILD="${VERSION_BUILD%-lin.*}"
-    VERSION_BUILD="${VERSION_BUILD%-win.*}"
+    # Warn if source files are newer than the built binary
+    BUILD_BINARY=""
+    if [[ -f "$BUILD_DIST/Camoufox.app/Contents/MacOS/XUL" ]]; then
+        BUILD_BINARY="$BUILD_DIST/Camoufox.app/Contents/MacOS/XUL"
+    elif [[ -f "$BUILD_DIST/bin/libxul.so" ]]; then
+        BUILD_BINARY="$BUILD_DIST/bin/libxul.so"
+    fi
+    if [[ -n "$BUILD_BINARY" ]]; then
+        NEWER_SOURCE="$(find "$CF_SOURCE_DIR" -name '*.cpp' -newer "$BUILD_BINARY" -not -path '*/obj-*' 2>/dev/null | head -1)"
+        if [[ -n "$NEWER_SOURCE" ]]; then
+            echo ""
+            echo "WARNING: Source files are newer than the built binary."
+            echo "         Run 'make build' first if you want to include recent edits."
+            echo "         (e.g. $(basename "$NEWER_SOURCE") is newer than XUL)"
+            echo ""
+        fi
+    fi
+else
+    # Fall back to dist/ zip
+    ARTIFACT="$(ls -t "$REPO_ROOT"/dist/camoufox-*-"${PLAT}".zip 2>/dev/null | head -1)"
+    if [[ -z "$ARTIFACT" ]]; then
+        echo "No build tree or artifact found."
+        echo "Run 'make build' or 'python3 multibuild.py' first."
+        exit 1
+    fi
+    echo "Using artifact: $ARTIFACT"
 fi
 
 echo "Version: $VERSION_BUILD"
 
-# --- Extract version and build parts ---
-
-# version-build format: "146.0.1-ruben.brotli-fix.1"
-# version = everything up to the first hyphen-followed-by-non-digit
-# For simplicity, split on first hyphen after the semver
-VERSION="$(echo "$VERSION_BUILD" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')"
-BUILD="${VERSION_BUILD#${VERSION}-}"
-
 INSTALL_DIR="${BROWSERS_DIR}/local/${VERSION_BUILD}"
-
 echo "Installing to: $INSTALL_DIR"
+
+# --- Sync properties.json from settings/ to build tree ---
+
+if [[ -f "$REPO_ROOT/settings/properties.json" ]] && [[ -d "$CF_SOURCE_DIR/lw" ]]; then
+    cp "$REPO_ROOT/settings/properties.json" "$CF_SOURCE_DIR/lw/properties.json"
+fi
 
 # --- Ensure compat flag exists (prevents pip camoufox from wiping the cache) ---
 
@@ -102,21 +138,37 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 
-# Unzip to temp dir first to handle nested structure
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-unzip -q "$ARTIFACT" -d "$TMP_DIR"
-
-# Handle macOS structure: the zip may contain Camoufox.app directly or nested
-# Use cp -a instead of mv — mv fails with "Directory not empty" on partial reinstalls
-if [[ -d "$TMP_DIR/Camoufox.app" ]]; then
-    cp -a "$TMP_DIR/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
-elif [[ -d "$TMP_DIR/Camoufox/Camoufox.app" ]]; then
-    cp -a "$TMP_DIR/Camoufox/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+if [[ "$INSTALL_FROM_BUILD" == true ]]; then
+    # Copy directly from the build tree — always fresh
+    if [[ -d "$BUILD_DIST/Camoufox.app" ]]; then
+        cp -a "$BUILD_DIST/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+    else
+        cp -a "$BUILD_DIST/bin"/. "$INSTALL_DIR/"
+    fi
+    # Sync properties.json into the installed resources
+    if [[ -f "$REPO_ROOT/settings/properties.json" ]]; then
+        for dest in \
+            "$INSTALL_DIR/Camoufox.app/Contents/Resources/properties.json" \
+            "$INSTALL_DIR/properties.json"; do
+            if [[ -d "$(dirname "$dest")" ]]; then
+                cp "$REPO_ROOT/settings/properties.json" "$dest"
+            fi
+        done
+    fi
 else
-    # Linux/Windows: copy everything
-    cp -a "$TMP_DIR"/. "$INSTALL_DIR/"
+    # Unzip artifact
+    TMP_DIR="$(mktemp -d)"
+    trap 'rm -rf "$TMP_DIR"' EXIT
+
+    unzip -q "$ARTIFACT" -d "$TMP_DIR"
+
+    if [[ -d "$TMP_DIR/Camoufox.app" ]]; then
+        cp -a "$TMP_DIR/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+    elif [[ -d "$TMP_DIR/Camoufox/Camoufox.app" ]]; then
+        cp -a "$TMP_DIR/Camoufox/Camoufox.app" "$INSTALL_DIR/Camoufox.app"
+    else
+        cp -a "$TMP_DIR"/. "$INSTALL_DIR/"
+    fi
 fi
 
 # Fix permissions (cp/unzip can strip executable bits)

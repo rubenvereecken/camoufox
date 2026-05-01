@@ -119,49 +119,6 @@ def _generate_random_font_subset(target_os: str) -> List[str]:
     return result
 
 
-# Font resolution aliases per target OS.
-# These map names that web content or Firefox prefs might query to the
-# correct bundled font.  Keys are lowercased to match GenerateFontListKey().
-_MACOS_FONT_RESOLUTION_ALIASES: Dict[str, str] = {
-    # CSS generic pass-throughs: on Linux, Firefox prefs resolve these to
-    # fontconfig generic names (literal "sans-serif", "serif", etc.) which
-    # end up in FindAndAddFamiliesLocked.  Map them to the macOS defaults.
-    "sans-serif": "Helvetica",
-    "serif": "Times",
-    "monospace": "Menlo",
-    "cursive": "Apple Chancery",
-    "fantasy": "Papyrus",
-    # Emoji redirects (can't bundle Apple Color Emoji)
-    "apple color emoji": "Twemoji Mozilla",
-    "twemoji mozilla": "Twemoji Mozilla",
-}
-
-
-def _build_resolution_map(target_os: str) -> Dict[str, str]:
-    """
-    Build a closed font resolution map for the target OS.
-
-    Every font name query goes through FindAndAddFamiliesLocked() in C++.
-    Names present in this map resolve (possibly via alias).  Names absent
-    from the map return "not found" — closed sandbox, nothing leaks.
-
-    The map covers ALL fonts for the target OS (not the per-profile subset).
-    Per-profile subsetting is handled separately by FontListManager / setFontList().
-    """
-    os_fonts_data = _load_os_fonts()
-    os_key = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}.get(target_os, 'mac')
-    full_list = os_fonts_data.get(os_key, os_fonts_data.get('mac', []))
-
-    # Identity entries: lowercased name → properly-cased name
-    res_map: Dict[str, str] = {font.lower(): font for font in full_list}
-
-    # OS-specific aliases
-    if target_os == 'macos':
-        res_map.update(_MACOS_FONT_RESOLUTION_ALIASES)
-
-    return res_map
-
-
 # OS voice lists loaded from voices.json
 _OS_VOICES_CACHE: Optional[Dict[str, List[str]]] = None
 
@@ -367,10 +324,6 @@ def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any
             }.get(target_os, _MACOS_MARKER_FONTS))
             config['fonts'] = fonts
 
-    # Build closed resolution map for font sandboxing
-    config['fonts:resolution_map'] = _build_resolution_map(target_os)
-    config['fonts:use_resolution_map'] = True
-
     # Generate a unique random voice subset from the OS voice list
     try:
         config['voices'] = _generate_random_voice_subset(target_os)
@@ -523,11 +476,6 @@ def generate_context_fingerprint(
                 config['fonts'] = _generate_random_font_subset(os_name)
             except Exception:
                 pass
-
-        # Build closed resolution map for font sandboxing
-        if 'fonts:resolution_map' not in config:
-            config['fonts:resolution_map'] = _build_resolution_map(os_name)
-            config['fonts:use_resolution_map'] = True
 
         # Add voices (BrowserForge doesn't generate these)
         if 'voices' not in config:

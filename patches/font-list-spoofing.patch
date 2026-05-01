@@ -235,24 +235,35 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1632,6 +1633,35 @@
+@@ -1632,6 +1633,30 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
 
-+  // Font resolution map: closed sandbox.
-+  // Names in the map resolve (possibly remapped). Names absent = not found.
-+  if (MaskConfig::CheckBool("fonts:use_resolution_map")) {
-+    const auto& data = MaskConfig::GetJson();
-+    if (auto rmIt = data.find("fonts:resolution_map"); rmIt != data.end()) {
-+      const auto& resMap = *rmIt;
-+      std::string keyStr(key.get());
-+      auto it = resMap.find(keyStr);
-+      if (it == resMap.end() || it->is_null()) {
-+        return false;
++  // Font family aliases: remap Linux fontconfig generic pass-throughs to
++  // the correct families for the spoofed OS. On Linux, Firefox prefs resolve
++  // CSS generics to literal fontconfig names ("sans-serif", "serif", etc.)
++  // which reach FindAndAddFamiliesLocked as-is.
++  {
++    static const auto sAliases = [] {
++      std::unordered_map<std::string, std::string> m;
++      auto plat = MaskConfig::GetString("navigator.platform");
++      if (!plat) return m;
++      if (*plat == "MacIntel") {
++        m = {{"sans-serif", "Helvetica"}, {"serif", "Times"},
++             {"monospace", "Menlo"}, {"cursive", "Apple Chancery"},
++             {"fantasy", "Papyrus"}, {"apple color emoji", "Twemoji Mozilla"},
++             {"twemoji mozilla", "Twemoji Mozilla"}};
++      } else if (*plat == "Win32") {
++        m = {{"sans-serif", "Arial"}, {"serif", "Times New Roman"},
++             {"monospace", "Consolas"}, {"segoe ui emoji", "Twemoji Mozilla"},
++             {"twemoji mozilla", "Twemoji Mozilla"}};
 +      }
-+      if (it->is_string()) {
-+        auto mapped = it->get<std::string>();
-+        nsDependentCString mappedStr(mapped.c_str(), mapped.length());
++      return m;
++    }();
++    if (!sAliases.empty()) {
++      auto it = sAliases.find(std::string(key.get()));
++      if (it != sAliases.end()) {
++        nsDependentCString mappedStr(it->second.c_str(), it->second.length());
 +        GenerateFontListKey(mappedStr, key);
 +      }
 +    }

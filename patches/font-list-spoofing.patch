@@ -241,7 +241,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 
 +  // Font resolution map: closed sandbox.
 +  // Names in the map resolve (possibly remapped). Names absent = not found.
-+  {
++  if (MaskConfig::CheckBool("fonts:use_resolution_map")) {
 +    const auto& data = MaskConfig::GetJson();
 +    if (auto rmIt = data.find("fonts:resolution_map"); rmIt != data.end()) {
 +      const auto& resMap = *rmIt;

@@ -369,6 +369,7 @@ def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any
 
     # Build closed resolution map for font sandboxing
     config['fonts:resolution_map'] = _build_resolution_map(target_os)
+    config['fonts:use_resolution_map'] = True
 
     # Generate a unique random voice subset from the OS voice list
     try:
@@ -526,6 +527,7 @@ def generate_context_fingerprint(
         # Build closed resolution map for font sandboxing
         if 'fonts:resolution_map' not in config:
             config['fonts:resolution_map'] = _build_resolution_map(os_name)
+            config['fonts:use_resolution_map'] = True
 
         # Add voices (BrowserForge doesn't generate these)
         if 'voices' not in config:

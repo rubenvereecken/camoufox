@@ -62,6 +62,44 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
         f'<dir>{fonts_dir}</dir>',
     )
 
+    # Ensure TwemojiMozilla is used for emoji rendering. Without this,
+    # fontconfig's sans-serif→Arimo alias intercepts before Firefox's emoji
+    # fallback, producing monochrome glyphs instead of color emoji.
+    # These rules must appear BEFORE the generic family aliases so
+    # TwemojiMozilla is in the fallback chain before sans-serif→Arimo fires.
+    emoji_aliases = """
+  <!-- Route emoji font requests to the bundled TwemojiMozilla -->
+  <match target="pattern">
+    <test qual="any" name="family"><string>emoji</string></test>
+    <edit name="family" mode="assign" binding="same"><string>Twemoji Mozilla</string></edit>
+  </match>
+  <match target="pattern">
+    <test qual="any" name="family"><string>Apple Color Emoji</string></test>
+    <edit name="family" mode="assign" binding="same"><string>Twemoji Mozilla</string></edit>
+  </match>
+  <match target="pattern">
+    <test qual="any" name="family"><string>Segoe UI Emoji</string></test>
+    <edit name="family" mode="assign" binding="same"><string>Twemoji Mozilla</string></edit>
+  </match>
+  <match target="pattern">
+    <test qual="any" name="family"><string>Noto Color Emoji</string></test>
+    <edit name="family" mode="assign" binding="same"><string>Twemoji Mozilla</string></edit>
+  </match>
+  <!-- Global fallback: append TwemojiMozilla so emoji codepoints in any font resolve -->
+  <match target="pattern">
+    <edit name="family" mode="append"><string>Twemoji Mozilla</string></edit>
+  </match>
+"""
+    # Insert right after the <dir> line — before any alias rules that would
+    # intercept font family resolution. The append rule must be in place before
+    # sans-serif→Arimo fires so that TwemojiMozilla is in the fallback chain.
+    dir_tag_end = conf_content.find('</dir>')
+    if dir_tag_end > 0:
+        insert_pos = conf_content.find('\n', dir_tag_end) + 1
+        conf_content = conf_content[:insert_pos] + emoji_aliases + conf_content[insert_pos:]
+    else:
+        conf_content = conf_content.replace('</fontconfig>', emoji_aliases + '</fontconfig>')
+
     cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'camoufox', 'fontconfig')
     os.makedirs(cache_dir, exist_ok=True)
 

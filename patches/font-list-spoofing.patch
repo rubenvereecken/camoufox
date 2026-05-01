@@ -235,12 +235,12 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1632,6 +1633,30 @@
+@@ -1632,6 +1633,35 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
 
 +  // Font resolution map: closed sandbox.
-+  // Names in the map resolve (possibly remapped). Names absent → not found.
++  // Names in the map resolve (possibly remapped). Names absent = not found.
 +  {
 +    const auto& data = MaskConfig::GetJson();
 +    if (auto rmIt = data.find("fonts:resolution_map"); rmIt != data.end()) {

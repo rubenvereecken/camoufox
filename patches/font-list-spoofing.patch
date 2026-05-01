@@ -235,15 +235,13 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1632,6 +1633,30 @@
+@@ -1632,6 +1633,44 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
 
 +  // Font family aliases: remap Linux fontconfig generic pass-throughs to
-+  // the correct families for the spoofed OS. On Linux, Firefox prefs resolve
-+  // CSS generics to literal fontconfig names ("sans-serif", "serif", etc.)
-+  // which reach FindAndAddFamiliesLocked as-is.
-+  {
++  // the correct families for the spoofed OS.
++  if (MaskConfig::CheckBool("fonts:os_aliases")) {
 +    static const auto sAliases = [] {
 +      std::unordered_map<std::string, std::string> m;
 +      auto plat = MaskConfig::GetString("navigator.platform");

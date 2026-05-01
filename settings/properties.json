@@ -55,6 +55,7 @@
   { "property": "battery:dischargingTime", "type": "double" },
   { "property": "battery:level", "type": "double" },
   { "property": "fonts", "type": "array" },
+  { "property": "fonts:os_aliases", "type": "bool" },
   { "property": "fonts:spacing_seed", "type": "uint" },
   { "property": "fonts:mt_bias_monospace", "type": "double" },
   { "property": "fonts:mt_bias_sans_serif", "type": "double" },

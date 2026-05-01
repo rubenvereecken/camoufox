@@ -324,6 +324,8 @@ def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any
             }.get(target_os, _MACOS_MARKER_FONTS))
             config['fonts'] = fonts
 
+    config.setdefault('fonts:os_aliases', True)
+
     # Generate a unique random voice subset from the OS voice list
     try:
         config['voices'] = _generate_random_voice_subset(target_os)
@@ -476,6 +478,8 @@ def generate_context_fingerprint(
                 config['fonts'] = _generate_random_font_subset(os_name)
             except Exception:
                 pass
+
+        config.setdefault('fonts:os_aliases', True)
 
         # Add voices (BrowserForge doesn't generate these)
         if 'voices' not in config:

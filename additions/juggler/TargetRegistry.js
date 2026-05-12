@@ -28,16 +28,23 @@ let globalTabAndWindowActivationChain = Promise.resolve();
 let didCreateFirstPage = false;
 let globalNewPageChain = Promise.resolve();
 
-// Camoufox (Ruben): bound activateAndRun so a single wedged mouse-event ack
-// can't freeze every subsequent mouse dispatch via the module-global chain.
-// Root cause reference: observed mouse.move pipeline deadlock after ~80
-// trajectories on example.com — wedge was process-wide (fresh context +
-// fresh page also hung), keyboard worked fine (doesn't use activateAndRun),
-// consistent with `await Promise.all([watcher.ensureEvent(...)])` in
-// Page.dispatchMouseEvent (PageHandler.js) never resolving because the
-// juggler-mouse-event-hit-renderer observer notification for one specific
-// event didn't arrive. Timeout + chain reset contains the blast radius
-// from "permanent browser-wide mouse death" to "one raise-and-retry".
+// Camoufox (Ruben): two fixes for the activateAndRun mouse pipeline.
+//
+// 1. Removed this._window.focus() — it called OS-level window raise on every
+//    mouse dispatch, which serves no purpose in Camoufox's single-tab-per-context
+//    model (tab-switch check below handles multi-tab if it ever applies). The
+//    C++ mouse dispatch path (SynthesizeMouseEvent → widget.DispatchEvent →
+//    content process ACK) has zero focus checks. Removing this fixes two bugs:
+//    (a) two headed instances fighting for OS focus on every mouse.move, causing
+//    3s+ stalls as the window manager thrashes; (b) single-instance ACK loss
+//    when real cursor interleaves with synthetic events during the focus call.
+//    Content process already has overrideHasFocus + forceActiveState (main.js),
+//    so document.hasFocus() and visibilityState are unaffected.
+//
+// 2. Timeout + chain reset (below) — safety net for any remaining edge case
+//    where the juggler-mouse-event-hit-renderer ACK doesn't arrive. Converts
+//    permanent browser-wide mouse death into one rejected dispatch the caller
+//    can retry. In practice, with fix #1, this timeout should never fire.
 const ACTIVATE_AND_RUN_TIMEOUT_MS = 3000;
 
 class DownloadInterceptor {
@@ -474,7 +481,7 @@ export class PageTarget {
         );
       });
       const work = (async () => {
-        this._window.focus();
+        // Camoufox (Ruben): window.focus() removed — see comment at top of file.
         if (tabBrowser.selectedTab !== this._tab) {
           const promise = helper.awaitEvent(ownerWindow, 'TabSwitchDone');
           tabBrowser.selectedTab = this._tab;

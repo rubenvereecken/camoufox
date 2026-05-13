@@ -1,0 +1,20 @@
+diff --git a/dom/base/nsContentUtils.cpp b/dom/base/nsContentUtils.cpp
+--- a/dom/base/nsContentUtils.cpp
++++ b/dom/base/nsContentUtils.cpp
+@@ -9515,16 +9515,6 @@
+       return Err(NS_ERROR_FAILURE);
+     }
+
+-    if (!aOptions.mIsDOMEventSynthesized) {
+-      // TODO(edgar): There is currently no real use case for synthesizing a
+-      // mouse event with a callback that could be coalesced. For now, throw an
+-      // error. We can add support later if a need arises.
+-      NS_WARNING(
+-          "nsContentUtils::SynthesizeMouseEvent() does not support being "
+-          "called in the parent process with isDOMEventSynthesized=false, due "
+-          "to the callback doesn't not support on coalesced events");
+-      return Err(NS_ERROR_FAILURE);
+-    }
+   }
+
+   EventMessage msg;

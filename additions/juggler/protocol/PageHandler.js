@@ -520,7 +520,7 @@ export class PageHandler {
             inputSource: MouseEvent.MOZ_SOURCE_MOUSE,
           },
           {
-            isDOMEventSynthesized: false,
+            isDOMEventSynthesized: true,
             isWidgetEventSynthesized: false,
             isAsyncEnabled: false,
           },
@@ -559,7 +559,7 @@ export class PageHandler {
           },
           {
             ignoreRootScrollFrame: false,
-            isDOMEventSynthesized: false,
+            isDOMEventSynthesized: true,
             isWidgetEventSynthesized: false,
           },
         );

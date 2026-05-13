@@ -162,7 +162,6 @@ class Patcher:
             'voice-spoofing.patch': ['speech-voices-spoofing.patch'],
             'webgl-spoofing.patch': ['fingerprint-injection.patch'],
             'webrtc-ip-spoofing.patch': ['fingerprint-injection.patch'],
-            'allow-non-synthesized-mouse-callback.patch': ['playwright/0-playwright.patch'],
         }
 
         by_key = {}

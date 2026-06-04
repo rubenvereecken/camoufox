@@ -59,6 +59,23 @@ steps:
       - /workspace/camoufox-${_CAMOUFOX_TAG}-lin.x86_64.zip
       - gs://drivingtestuk-camoufox-artifacts/
 
+  # Cascade: fire the dev bot rebuild so dev tracks this fresh base (:latest).
+  # This is the single line that makes "dev auto-tracks latest" automatic —
+  # fork push → base builds (here) → dvsa-bot-dev rebuilds the bot FROM
+  # camoufox-base:latest and deploys to the dev container. PROD IS UNTOUCHED:
+  # it stays pinned to _CAMOUFOX_TAG in cloudbuild-bot.yaml and only moves on a
+  # deliberate pin bump. Best-effort — the base image is already built+pushed
+  # above, so a failure to fire the dev trigger must not fail the base build.
+  # Runs as ci-deployer (cloudbuild.builds.builder → can run triggers).
+  - name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud builds triggers run dvsa-bot-dev \
+          --region=europe-west2 --branch=main \
+          || echo "WARN: could not fire dvsa-bot-dev trigger — base image is still built+pushed; run it manually to refresh dev"
+
 substitutions:
   _CAMOUFOX_TAG: '146.0.1-ruben.dev.3'
   _GIT_COMMIT: ''

@@ -1,0 +1,115 @@
+# Camoufox base image — multi-stage build.
+#
+# Stage 1 (builder): Downloads Firefox source, applies Camoufox patches,
+# compiles for Linux x86_64, packages the binary.
+#
+# Stage 2 (runtime): Ubuntu 24.04 + xvfb + fonts + compiled Camoufox
+# at /camoufox/. This is the base image that dvsa-bot layers on top of.
+#
+# Local build:
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile.prod \
+#     -t camoufox-base:146.0.1-ruben.dev.2 .
+#
+# Cloud Build: see cloudbuild.yaml in this repo.
+
+# ---------------------------------------------------------------------------
+# Stage 1: Compile Camoufox for Linux x86_64
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04 AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential make wget unzip \
+    python3 python3-dev python3-pip \
+    git p7zip-full golang-go aria2 curl rsync \
+    libsqlite3-dev ccache msitools \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build
+
+# Copy repo source. .dockerignore excludes the 19GB extracted source tree,
+# 619MB tarball, dist/, .git/, pythonlib/, tests/ — keeps context under 50MB.
+COPY . .
+
+# Fetch Firefox source (~619MB via aria2c) + extract + copy Camoufox additions.
+# Then bootstrap mach (downloads Rust toolchain + Linux sysroots to ~/.mozbuild).
+#
+# BuildKit cache mounts persist across local rebuilds. On Cloud Build's
+# ephemeral workers they start empty — harmless, just no cross-build benefit.
+RUN --mount=type=cache,target=/root/.mozbuild \
+    make setup-minimal && \
+    make mozbootstrap
+
+# Compile. BUILD_TARGET tells patch.py which mozconfig triplet to write.
+# `make build` internally calls `make dir` (applies patches) + `./mach build`.
+ENV BUILD_TARGET=linux,x86_64
+
+RUN --mount=type=cache,target=/root/.mozbuild \
+    --mount=type=cache,target=/ccache \
+    CCACHE_DIR=/ccache make build
+
+# Package → camoufox-{version}-{release}-lin.x86_64.zip in /build/
+RUN --mount=type=cache,target=/root/.mozbuild \
+    make package-linux arch=x86_64
+
+# Stable path for stage 2 (COPY doesn't glob across stages).
+RUN mkdir -p /artifact && mv /build/camoufox-*-lin.x86_64.zip /artifact/camoufox.zip
+
+# Gate: every expected patch must be compiled into the artifact — C++ markers in
+# libxul.so AND juggler JS markers in omni.ja. Manifest-driven (patch-manifest.json).
+# A missing marker means stale/unpatched source; fail the build. This is the check
+# that would have caught the 2026-05 stale-build — synthesizeMouseEvent was absent
+# from the shipped omni.ja while version.json still claimed the patched build.
+RUN python3 scripts/verify_patch_markers.py /artifact/camoufox.zip patch-manifest.json
+
+# ---------------------------------------------------------------------------
+# Stage 2: Runtime — the actual camoufox-base image
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Runtime deps for headless Camoufox on Ubuntu 24.04.
+# Source: Playwright's nativeDeps.ts (authoritative, version-pinned).
+# Ubuntu 24.04 renames several libs with t64 suffix — old names fail.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    # GTK3 + X11
+    libgtk-3-0t64 libdbus-1-3 \
+    libx11-6 libx11-xcb1 libxcb1 libxcb-shm0 \
+    libxcomposite1 libxcursor1 libxdamage1 libxext6 \
+    libxfixes3 libxi6 libxrandr2 libxrender1 \
+    # Rendering
+    libcairo2 libcairo-gobject2 \
+    libpango-1.0-0 libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 libglib2.0-0t64 \
+    libatk1.0-0t64 \
+    # Audio — Firefox links ALSA even headless
+    libasound2t64 \
+    # Fonts
+    libfontconfig1 libfreetype6 \
+    fonts-liberation fontconfig \
+    # Misc (XPCOMGlueLoad fails without dbus-glib)
+    libdbus-glib-1-2 libxt6t64 \
+    # Unzip — purged after use
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /artifact/camoufox.zip /tmp/camoufox.zip
+
+RUN mkdir -p /camoufox \
+    && unzip /tmp/camoufox.zip -d /camoufox \
+    && rm /tmp/camoufox.zip \
+    && apt-get purge -y unzip && apt-get autoremove -y --purge \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN test -x /camoufox/camoufox-bin
+
+# Patch-marker verification (C++ in libxul.so + juggler JS in omni.ja) runs in the
+# builder stage against the packaged artifact — see scripts/verify_patch_markers.py.
+# It fails the build before this runtime stage if any expected patch is missing.

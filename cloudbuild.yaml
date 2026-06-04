@@ -1,0 +1,82 @@
+# Cloud Build config for camoufox-base image.
+#
+# Triggered on tags matching v*-ruben.* pushed to rubenvereecken/camoufox.
+# First build is cold (~30-60 min on e2-highcpu-32). Subsequent builds with
+# unchanged source hit Docker layer cache and finish in minutes.
+#
+# Manual submit:
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --substitutions=_CAMOUFOX_TAG=146.0.1-ruben.dev.2 \
+#     --project=drivingtestuk \
+#     --region=europe-west2
+
+steps:
+  # Build the multi-stage image (compile + runtime).
+  # DOCKER_BUILDKIT=1 enables BuildKit for --mount=type=cache in the Dockerfile.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.prod
+      - -t
+      - $_IMAGE:${_CAMOUFOX_TAG}
+      - -t
+      - $_IMAGE:latest
+      - .
+    env:
+      - DOCKER_BUILDKIT=1
+
+  # Push both tags to Artifact Registry.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - $_IMAGE
+
+  # Extract the packaged .zip from the image and upload to GCS.
+  # Useful for installing Camoufox on dev Linux machines without rebuilding.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        id=$$(docker create $_IMAGE:${_CAMOUFOX_TAG})
+        docker cp $$id:/camoufox /workspace/camoufox-extract
+        docker rm $$id
+        apt-get update -qq && apt-get install -y -qq zip >/dev/null
+        cd /workspace/camoufox-extract
+        zip -qr /workspace/camoufox-${_CAMOUFOX_TAG}-lin.x86_64.zip .
+
+  - name: gcr.io/cloud-builders/gsutil
+    args:
+      - cp
+      - /workspace/camoufox-${_CAMOUFOX_TAG}-lin.x86_64.zip
+      - gs://drivingtestuk-camoufox-artifacts/
+
+substitutions:
+  _CAMOUFOX_TAG: '146.0.1-ruben.dev.2'
+  _IMAGE: 'europe-west2-docker.pkg.dev/drivingtestuk/bot-images/camoufox-base'
+
+options:
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: '200'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 5400s
+
+images:
+  - $_IMAGE:${_CAMOUFOX_TAG}
+  - $_IMAGE:latest
+
+# TODO: ccache persistence for warm builds.
+# Current state: BuildKit --mount=type=cache in the Dockerfile starts empty
+# on Cloud Build's ephemeral workers. Warm builds that only change a few
+# patches still recompile everything (~30-60 min).
+#
+# Future optimisation (add when we're iterating on patches frequently):
+#   1. Before docker build: gsutil cp gs://drivingtestuk-ccache/camoufox/ccache.tar.gz
+#      → extract to /workspace/ccache/
+#   2. Inject into Docker build (options: COPY via build context, or switch
+#      to native compile steps with the builder image + volume mounts)
+#   3. After build: tar + gsutil cp back to GCS
+# Expected warm build: 10-20 min instead of 30-60 min.

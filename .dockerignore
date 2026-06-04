@@ -1,0 +1,31 @@
+# Build context for Dockerfile.prod.
+# The extracted source tree and tarball are the big ones — 19GB + 619MB.
+# Both are recreated inside the build (make setup-minimal downloads + extracts).
+
+# Extracted Firefox source tree (19GB, recreated by make setup-minimal)
+camoufox-*/
+
+# Firefox source tarball (619MB, re-downloaded by make fetch via aria2c)
+firefox-*.tar.xz
+
+# Previous build artifacts
+dist/
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Not needed for compile or package
+pythonlib/
+tests/
+legacy/
+docs/
+example/
+build-tester/
+service-tester/
+
+# Metadata
+*.md
+LICENSE
+.DS_Store

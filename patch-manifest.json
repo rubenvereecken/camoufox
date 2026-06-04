@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "Markers proving each patch class is actually compiled into the built artifact.",
+    "The build gate (scripts/verify_patch_markers.py, run from Dockerfile.prod) fails",
+    "the build if any marker is absent — a missing marker means the artifact was",
+    "compiled from stale/unpatched source. This is the check that would have caught",
+    "the 2026-05 stale-build incident: the synthesizeMouseEvent juggler fix was absent",
+    "from the shipped omni.ja even though version.json claimed the patched build.",
+    "",
+    "libxul_markers: C++ symbols/strings that must appear in libxul.so.",
+    "omni_markers:   identifiers that must appear in juggler JS inside omni.ja.",
+    "",
+    "When you add a patch that introduces a NEW capability, add a stable marker for",
+    "it here so the gate proves it shipped. Prefer code identifiers (function names)",
+    "over comments — comments can be stripped, identifiers can't."
+  ],
+  "libxul_markers": [
+    "CAMOU_CONFIG",
+    "setFontSpacingSeed",
+    "setAudioFingerprintSeed",
+    "setFontList"
+  ],
+  "omni_markers": [
+    "synthesizeMouseEvent"
+  ]
+}

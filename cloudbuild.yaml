@@ -75,15 +75,29 @@ images:
   - $_IMAGE:${_CAMOUFOX_TAG}
   - $_IMAGE:latest
 
-# TODO: ccache persistence for warm builds.
-# Current state: BuildKit --mount=type=cache in the Dockerfile starts empty
-# on Cloud Build's ephemeral workers. Warm builds that only change a few
-# patches still recompile everything (~30-60 min).
+# TODO [build-affordability — designed, not yet implemented]: persist the
+# compile cache across builds so source-changed rebuilds are fast.
 #
-# Future optimisation (add when we're iterating on patches frequently):
-#   1. Before docker build: gsutil cp gs://drivingtestuk-ccache/camoufox/ccache.tar.gz
-#      → extract to /workspace/ccache/
-#   2. Inject into Docker build (options: COPY via build context, or switch
-#      to native compile steps with the builder image + volume mounts)
-#   3. After build: tar + gsutil cp back to GCS
-# Expected warm build: 10-20 min instead of 30-60 min.
+# Today every Cloud Build is cold (~30-60 min): the BuildKit --mount=type=cache
+# for /ccache and /root/.mozbuild in Dockerfile.prod starts EMPTY on Cloud
+# Build's ephemeral workers, so `make build` recompiles from scratch every time.
+#
+# Classic `docker build --cache-from` does NOT fix this for a multi-stage build:
+# inline cache only covers stages that reach the final image, NOT the builder
+# (compile) stage, and it can't persist a cache-mount. The two approaches that
+# actually work — both need validation across two real builds before trusting:
+#
+#   A. buildx registry cache (preferred): switch the build step to
+#      `docker buildx build --cache-to=type=registry,ref=$_IMAGE:buildcache,mode=max
+#      --cache-from=type=registry,ref=$_IMAGE:buildcache`. mode=max exports ALL
+#      stages incl. the builder compile AND the /ccache mount. Requires a
+#      `docker buildx create --use` step and reworking push/extract (buildx
+#      --push uploads directly; the zip-extract step then needs --load or a pull).
+#   B. GCS ccache round-trip: gsutil cp gs://drivingtestuk-ccache/camoufox/ →
+#      seed /ccache → build → tar + cp back. Needs the compile moved to native
+#      Cloud Build steps (so /workspace/ccache survives), not `docker build`.
+#
+# Payoff once enabled: a C++ patch change ~10-20 min (ccache hit); a juggler
+# JS-only change (additions/juggler/**) is near-instant — no C++ recompile, just
+# relink + omni.ja repackage. The first build after enabling establishes the
+# cache; the second proves the warm path.

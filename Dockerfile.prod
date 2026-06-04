@@ -67,6 +67,20 @@ RUN mkdir -p /artifact && mv /build/camoufox-*-lin.x86_64.zip /artifact/camoufox
 # from the shipped omni.ja while version.json still claimed the patched build.
 RUN python3 scripts/verify_patch_markers.py /artifact/camoufox.zip patch-manifest.json
 
+# Stamp a truthful version.json into the artifact: the actual fork commit that
+# built this binary + a hash of the patch manifest, alongside version/build.
+# The bot layer and docker-entrypoint.sh READ this (they no longer synthesise it
+# from a tag string), so version.json can't drift from the binary it describes —
+# and the deploy gate can assert git_commit matches the intended pin. .git is not
+# in the build context, so the commit comes in as a build-arg (Cloud Build passes
+# $COMMIT_SHA; manual builds should pass GIT_COMMIT=$(git rev-parse HEAD)).
+ARG GIT_COMMIT=unknown
+RUN . ./upstream.sh \
+    && MANIFEST_SHA=$(sha256sum patch-manifest.json | cut -d' ' -f1) \
+    && printf '{"version":"%s","build":"%s","git_commit":"%s","patch_manifest_sha256":"%s","prerelease":false,"local_build":true}\n' \
+       "$version" "$release" "$GIT_COMMIT" "$MANIFEST_SHA" > /artifact/version.json \
+    && echo "Baked version.json:" && cat /artifact/version.json
+
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime — the actual camoufox-base image
 # ---------------------------------------------------------------------------
@@ -107,6 +121,11 @@ RUN mkdir -p /camoufox \
     && rm /tmp/camoufox.zip \
     && apt-get purge -y unzip && apt-get autoremove -y --purge \
     && rm -rf /var/lib/apt/lists/*
+
+# Truthful version.json baked in the builder (commit + manifest hash). This is
+# the single source of truth the bot layer and entrypoint read to wire the cache
+# path — overwrites whatever the package step produced.
+COPY --from=builder /artifact/version.json /camoufox/version.json
 
 RUN test -x /camoufox/camoufox-bin
 

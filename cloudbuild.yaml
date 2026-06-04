@@ -18,6 +18,11 @@ steps:
       - build
       - -f
       - Dockerfile.prod
+      # Bake the building commit into version.json (truthful provenance — the
+      # deploy gate asserts it). $COMMIT_SHA is auto-set for triggered builds;
+      # for a manual `gcloud builds submit`, pass --substitutions=COMMIT_SHA=...
+      - --build-arg
+      - GIT_COMMIT=$COMMIT_SHA
       - -t
       - $_IMAGE:${_CAMOUFOX_TAG}
       - -t

@@ -77,6 +77,13 @@ pageTypes.Size = {
 pageTypes.Viewport = {
   viewportSize: pageTypes.Size,
   deviceScaleFactor: t.Optional(t.Number),
+  // Playwright >=1.61 sends these on Browser.setDefaultViewport; without them the
+  // schema rejects the call ("viewport.isMobile ... not described in this scheme")
+  // and every context creation fails. Ported from daijro/camoufox 2b662a8 (schema
+  // fields only). Lets us run the Playwright 1.62 client (which carries the
+  // wrap_api_call inspect.stack perf fix, PR #3147) on this FF146 build.
+  screenSize: t.Optional(pageTypes.Size),
+  isMobile: t.Optional(t.Boolean),
 };
 
 pageTypes.DOMQuad = {

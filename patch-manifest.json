@@ -21,6 +21,7 @@
     "setFontList"
   ],
   "omni_markers": [
-    "synthesizeMouseEvent"
+    "synthesizeMouseEvent",
+    "isMobile: t.Optional(t.Boolean)"
   ]
 }

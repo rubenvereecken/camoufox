@@ -133,8 +133,13 @@ class Runtime {
           return;
         }
         const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
+        const errorLocation = {
+          lineNumber: message.lineNumber - 1,
+          columnNumber: message.columnNumber - 1,
+          url: message.sourceName,
+        };
         if (message.category === 'Web Worker' && message.logLevel === Ci.nsIConsoleMessage.error) {
-          emitEvent(this.events.onErrorFromWorker, errorWindow, message.message, '' + message.stack);
+          emitEvent(this.events.onErrorFromWorker, errorWindow, message.message, '' + message.stack, errorLocation);
           return;
         }
         const executionContext = this._windowToExecutionContext.get(errorWindow);
@@ -164,7 +169,8 @@ class Runtime {
           emitEvent(this.events.onRuntimeError, {
             executionContext,
             message: message.errorMessage,
-            stack: message.stack.toString(),
+            stack: message.stack ? message.stack.toString() : '',
+            location: errorLocation,
           });
         }
       },

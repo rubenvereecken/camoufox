@@ -77,7 +77,11 @@ steps:
           || echo "WARN: could not fire dvsa-bot-dev trigger — base image is still built+pushed; run it manually to refresh dev"
 
 substitutions:
-  _CAMOUFOX_TAG: '146.0.1-ruben.dev.3'
+  # MUST stay in sync with upstream.sh (version-release) until F45's durable fix
+  # (derive this tag from upstream.sh) lands — the fork-main trigger does NOT
+  # override this default, so a stale value here re-stamps the OLD tag with NEW
+  # content and never creates the new tag (bit us on dev.4, watchlist F45).
+  _CAMOUFOX_TAG: '146.0.1-ruben.dev.5'
   _GIT_COMMIT: ''
   _IMAGE: 'europe-west2-docker.pkg.dev/drivingtestuk/bot-images/camoufox-base'
 

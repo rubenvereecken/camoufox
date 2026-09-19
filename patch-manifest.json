@@ -22,6 +22,7 @@
   ],
   "omni_markers": [
     "synthesizeMouseEvent",
-    "isMobile: t.Optional(t.Boolean)"
+    "isMobile: t.Optional(t.Boolean)",
+    "location: errorLocation"
   ]
 }

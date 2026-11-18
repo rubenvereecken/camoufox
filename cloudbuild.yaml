@@ -60,21 +60,35 @@ steps:
       - gs://drivingtestuk-camoufox-artifacts/
 
   # Cascade: fire the dev bot rebuild so dev tracks this fresh base (:latest).
-  # This is the single line that makes "dev auto-tracks latest" automatic —
-  # fork push → base builds (here) → dvsa-bot-dev rebuilds the bot FROM
+  # This is the single step that makes "dev auto-tracks latest" automatic —
+  # fork push → base builds (here) → drivingtest's GitLab pipeline (trigger API,
+  # BOT_ENV=dev) runs its bot-deploy-dev job, which rebuilds the bot FROM
   # camoufox-base:latest and deploys to the dev container. PROD IS UNTOUCHED:
   # it stays pinned to _CAMOUFOX_TAG in cloudbuild-bot.yaml and only moves on a
   # deliberate pin bump. Best-effort — the base image is already built+pushed
-  # above, so a failure to fire the dev trigger must not fail the base build.
-  # Runs as ci-deployer (cloudbuild.builds.builder → can run triggers).
+  # above, so a failure to fire the dev deploy must not fail the base build.
+  # drivingtest moved to GitLab on 2026-11-18; this replaced
+  # `gcloud builds triggers run dvsa-bot-dev` (that trigger is retired). The
+  # token is a GitLab pipeline trigger token in Secret Manager
+  # (gitlab-pipeline-trigger-token); 89087750 = getdesto/drivingtest's project id.
   - name: gcr.io/cloud-builders/gcloud
     entrypoint: bash
+    secretEnv: ['GITLAB_TRIGGER_TOKEN']
     args:
       - -c
       - |
-        gcloud builds triggers run dvsa-bot-dev \
-          --region=europe-west2 --branch=main \
-          || echo "WARN: could not fire dvsa-bot-dev trigger — base image is still built+pushed; run it manually to refresh dev"
+        curl -fsS -X POST \
+          --form-string "token=$$GITLAB_TRIGGER_TOKEN" \
+          --form-string "ref=main" \
+          --form-string "variables[BOT_ENV]=dev" \
+          https://gitlab.com/api/v4/projects/89087750/trigger/pipeline >/dev/null \
+          && echo "fired drivingtest bot-deploy-dev (GitLab pipeline, BOT_ENV=dev)" \
+          || echo "WARN: could not fire the GitLab dev deploy — base image is still built+pushed; run bot-deploy-dev by hand to refresh dev"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/drivingtestuk/secrets/gitlab-pipeline-trigger-token/versions/latest
+      env: GITLAB_TRIGGER_TOKEN
 
 substitutions:
   # MUST stay in sync with upstream.sh (version-release) until F45's durable fix
